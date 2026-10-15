@@ -1,8 +1,0 @@
-pyproject.toml
-src/carver_quant/__init__.py
-src/carver_quant_lab.egg-info/PKG-INFO
-src/carver_quant_lab.egg-info/SOURCES.txt
-src/carver_quant_lab.egg-info/dependency_links.txt
-src/carver_quant_lab.egg-info/top_level.txt
-tests/test_environment.py
-tests/test_position.py
