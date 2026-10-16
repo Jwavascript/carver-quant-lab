@@ -33,7 +33,7 @@
 | Paper Trading, Live Trading, 브로커 Adapter | **없음** | — |
 | 주문 상태 관리, Reconciliation, Kill Switch | **없음** | — |
 | Survivorship bias 처리 | **없음** | — |
-| ADR (설계 결정 기록) | ADR-0001~0009 **ACCEPTED** (2026-10-16, 설계 원칙만 승인). **구현은 시작하지 않음** | `docs/adr/` (§7.1) |
+| ADR (설계 결정 기록) | ADR-0001~0012 **ACCEPTED** (2026-10-16, 설계 원칙만 승인). **구현은 시작하지 않음** | `docs/adr/` (§7.1) |
 
 `execution.py`의 `execute_market_order`는 **시뮬레이션 체결**이다. 실제 주문 기능이 아니다.
 
@@ -70,9 +70,9 @@
 
 ## 4. 아키텍처 방향 (잠정)
 
-> 아래는 **현재의 방향**이다. 논리 계층과 의존성 방향은 ACCEPTED [ADR-0004](docs/adr/0004-market-data-and-domain-boundaries.md)를 따른다. 물리적 패키지 개편(하위 패키지 도입, 모듈 이동)은 별도 결정(D-10)과 승인 전에는 하지 않는다. 방향을 이유로 기존 구조를 바꾸지 않는다.
+> 아래는 **현재의 방향**이다. 논리 계층과 의존성 방향은 ACCEPTED [ADR-0004](docs/adr/0004-market-data-and-domain-boundaries.md)를 따른다. 물리적 배치는 ACCEPTED [ADR-0010](docs/adr/0010-physical-package-boundaries.md)의 원칙을 따른다: V1 모듈 34개는 현재 위치에 그대로 두고, 새 코드는 V1과 분리된 우산 하위 패키지(이름은 미정, 가칭 `carver_quant.lab`)에 둔다. 실제 패키지 생성과 모듈 이동은 별도 작업 명세와 승인 전에는 하지 않는다. 방향을 이유로 기존 구조를 바꾸지 않는다.
 >
-> 체결 시점과 손익 회계, warm-up과 거래 허용, 거래 전 위험 검사는 ACCEPTED ADR을 따른다: [ADR-0001](docs/adr/0001-execution-timing-and-valuation.md), [ADR-0002](docs/adr/0002-warmup-and-tradability.md), [ADR-0003](docs/adr/0003-pretrade-risk-policy.md). 데이터 경계, 백테스트 경로와 V1 호환, 선물·ETF 상품 모델은 [ADR-0004](docs/adr/0004-market-data-and-domain-boundaries.md), [ADR-0005](docs/adr/0005-backtest-paths-and-v1-compatibility.md), [ADR-0006](docs/adr/0006-futures-etf-instrument-model.md)을 따른다. 다시장 달력과 평가 시점, 다통화 NAV와 현금 원장, 주문·체결·포지션 생애주기는 [ADR-0007](docs/adr/0007-multi-market-calendar-and-valuation.md), [ADR-0008](docs/adr/0008-multi-currency-fx-accounting.md), [ADR-0009](docs/adr/0009-order-fill-and-position-lifecycle.md)을 따른다. 이 ADR들은 설계 원칙이며 아직 구현되지 않았다. 기존 V1 API는 현재 동작을 유지한다 (ADR-0001~0003 §8.0, ADR-0005).
+> 체결 시점과 손익 회계, warm-up과 거래 허용, 거래 전 위험 검사는 ACCEPTED ADR을 따른다: [ADR-0001](docs/adr/0001-execution-timing-and-valuation.md), [ADR-0002](docs/adr/0002-warmup-and-tradability.md), [ADR-0003](docs/adr/0003-pretrade-risk-policy.md). 데이터 경계, 백테스트 경로와 V1 호환, 선물·ETF 상품 모델은 [ADR-0004](docs/adr/0004-market-data-and-domain-boundaries.md), [ADR-0005](docs/adr/0005-backtest-paths-and-v1-compatibility.md), [ADR-0006](docs/adr/0006-futures-etf-instrument-model.md)을 따른다. 다시장 달력과 평가 시점, 다통화 NAV와 현금 원장, 주문·체결·포지션 생애주기는 [ADR-0007](docs/adr/0007-multi-market-calendar-and-valuation.md), [ADR-0008](docs/adr/0008-multi-currency-fx-accounting.md), [ADR-0009](docs/adr/0009-order-fill-and-position-lifecycle.md)을 따른다. 패키지 경계, 백테스트 재현성(golden master와 새 fingerprint), 브로커 Adapter 경계와 실패 처리는 [ADR-0010](docs/adr/0010-physical-package-boundaries.md), [ADR-0011](docs/adr/0011-backtest-reproducibility-and-schema-versioning.md), [ADR-0012](docs/adr/0012-broker-adapter-boundaries.md)을 따른다. 이 ADR들은 설계 원칙이며 아직 구현되지 않았다. 기존 V1 API는 현재 동작을 유지한다 (ADR-0001~0003 §8.0, ADR-0005).
 
 - Python 중심 **Modular Monolith**
 - **Functional Core / Imperative Shell**: 금융 계산은 부수효과 없는 순수 함수와 frozen dataclass로 작성하고, I/O·시간·브로커 호출은 바깥 계층에 둔다. 현재 `src/carver_quant/`에는 I/O, 현재 시각 조회, 난수 사용이 없다. 이 성질을 유지한다.
@@ -172,9 +172,12 @@ ADR이 승인되었다고 해서 그 내용을 바로 구현해도 된다는 뜻
 | [0007](docs/adr/0007-multi-market-calendar-and-valuation.md) | 다시장 거래일과 평가 시점 (시각(instant) 기반 달력, UTC + IANA 타임존, 계좌 단위 일정, 상품별 데이터 상태 4종, 명시적 평가 정책, 주문 의도·제출·체결 가능 시각 구분) | ACCEPTED (설계 원칙) |
 | [0008](docs/adr/0008-multi-currency-fx-accounting.md) | 다통화 FX와 현금 회계 (통화별 현금·자산, 기준통화 NAV와 분해 항등식, 통화별 현금 이벤트 원장, ADR-0001 `PnL[t]`를 거래 손익으로 유지, 수수료 정확히 한 번) | ACCEPTED (설계 원칙) |
 | [0009](docs/adr/0009-order-fill-and-position-lifecycle.md) | 주문·체결·포지션 생애주기 (목표·실제·예상 포지션 분리, 주문 상태 11종, 체결 ID 멱등성과 동일성 검사, 정정 중 보수적 노출, `UNKNOWN` → `HALTED`) | ACCEPTED (설계 원칙) |
+| [0010](docs/adr/0010-physical-package-boundaries.md) | 물리적 패키지 경계 (V1 모듈 보존, 새 코드는 분리된 우산 하위 패키지, 전부 이동 + shim 불채택, 계층·의존 규칙, 실주문 실행 경계 제한) | ACCEPTED (설계 원칙) |
+| [0011](docs/adr/0011-backtest-reproducibility-and-schema-versioning.md) | 백테스트 재현성 (구조 변경 전 V1 golden, V1 인코더·fingerprint 불변, 새 schema·manifest와 구별되는 fingerprint, 데이터 내용을 반영한 입력 fingerprint, golden·금융 검증·차등 비교의 구분) | ACCEPTED (설계 원칙) |
+| [0012](docs/adr/0012-broker-adapter-boundaries.md) | 브로커 Adapter 경계 (공통 port, 영속화 확인 후 전송, 쓰기 결과 4분류, 불명확 주문 자동 재제출 금지와 보수적 노출, 재시작 대조, 기능 검증 없는 Live 거부) | ACCEPTED (설계 원칙) |
 
-- **ACCEPTED는 설계 원칙의 승인이다.** 구현 완료, 금융 계산의 정확성 검증, Live Trading 준비 완료를 뜻하지 않는다. ADR-0001~0009 모두 아직 구현되지 않았다. 구현에는 §5의 별도 작업 명세, 독립 수치 검증, 단위 테스트, 사용자 승인이 각각 필요하다.
-- 미해결 금융 수치(한도, warm-up 길이, vol 하한)와 시장·브로커별 결정(체결 시각, 평가가격, FX 시점, 증거금 모델, 복구 절차)은 각 ADR의 Open Questions로 남아 있다. 요약은 [P0-02A_DECISION_SUMMARY.md](docs/architecture/P0-02A_DECISION_SUMMARY.md), [P0-02B_DECISION_SUMMARY.md](docs/architecture/P0-02B_DECISION_SUMMARY.md), [P0-02C1_DECISION_SUMMARY.md](docs/architecture/P0-02C1_DECISION_SUMMARY.md)에 있다.
+- **ACCEPTED는 설계 원칙의 승인이다.** 구현 완료, 금융 계산의 정확성 검증, Live Trading 준비 완료를 뜻하지 않는다. ADR-0001~0012 모두 아직 구현되지 않았다. 구현에는 §5의 별도 작업 명세, 독립 수치 검증, 단위 테스트, 사용자 승인이 각각 필요하다.
+- 미해결 금융 수치(한도, warm-up 길이, vol 하한)와 시장·브로커별 결정(체결 시각, 평가가격, FX 시점, 증거금 모델, 복구 절차)은 각 ADR의 Open Questions로 남아 있다. 요약은 [P0-02A_DECISION_SUMMARY.md](docs/architecture/P0-02A_DECISION_SUMMARY.md), [P0-02B_DECISION_SUMMARY.md](docs/architecture/P0-02B_DECISION_SUMMARY.md), [P0-02C1_DECISION_SUMMARY.md](docs/architecture/P0-02C1_DECISION_SUMMARY.md), [P0-02C2_DECISION_SUMMARY.md](docs/architecture/P0-02C2_DECISION_SUMMARY.md)에 있다.
 - ADR-0004~0006에서 **승인되지 않은 선택** (구현 전에 사용자 결정이 필요하다. 전체 목록은 P0-02B 요약 §0.2):
   - 역방향 의존을 없애는 방식: 타입 이동 + 재export / 이동 없는 `TYPE_CHECKING`·`Protocol` (ADR-0004 Q4-1)
   - 새 `RESEARCH` API에서 날짜별 위험 예산 직접 입력을 허용할지 (ADR-0004 Q4-7). `LIVE`에서는 결정 시점 계좌와 위험 목표를 쓴다
@@ -185,8 +188,12 @@ ADR이 승인되었다고 해서 그 내용을 바로 구현해도 된다는 뜻
   - R1의 수수료 통화 확장: 상품 통화와 다른 수수료 통화의 운영 처리, 수수료 환산 시각, 브로커 환전 수수료 (ADR-0008 F8-3, F8-4, Q8-11). ADR-0001의 잠정 가정(`κ_fee = 상품 통화`)과 Q1-4는 그대로다
   - NAV 분해의 보고 관례(Q8-3), FX 공급자·시각·결측 정책, 기준통화, 이자, 수익률 방식 (ADR-0008 Q8-1~Q8-10)
   - 실제 브로커 동작: 상태 대응, 정정 원자성과 수량 의미, 체결 ID 범위, 주문 유형, 롤 순서, timeout (ADR-0009 Q9-1~Q9-11, D-12)
+- ADR-0010~0012에서 **승인되지 않은 선택** (구현 전에 사용자 결정이 필요하다. 전체 목록은 P0-02C2 요약 §0.2):
+  - 패키지 의존 예외: `risk → accounting`(PK-2), 새 코어의 V1 공식 함수 재사용(PK-9)과 ADR-0001 §8.0 해석, `ports`·`app`의 계층 분류. ACCEPTED ADR-0004 §6.2 표와 다르므로 **승인 전 사용 금지** (ADR-0010 Q10-2, Q10-4). 패키지 이름(Q10-1), 타임존 데이터 의존성(Q10-7)
+  - golden 구현 세부: 저장 형식, fixture 목록, 구현 시점, 갱신 절차, 환경 간·차등 비교 허용 오차, 새 인코더 수치 규칙, `content_hash` canonicalization (ADR-0011 Q11-1~Q11-11, ADR-0005 Q5-4, Q5-6, Q5-9)
+  - 브로커 운영 정책: 브로커 선정, Live 필수 기능과 검증 수준, 저장소와 내구성, 비정상 재시작 정책, `UNKNOWN` 상한 축소 조건, 기준 시각 없는 브로커, NAV 미확정 시 계좌 전체 차단(BR-13), `order_submitted_at` 정의, 수동 재제출과 Kill Switch 복구 (ADR-0012 Q12-1~Q12-16)
 - 새 ADR이 기존 ACCEPTED ADR과 충돌하면 조용히 덮어쓰지 않는다. 충돌을 명시하고, 기존 ADR을 대체하는 별도 결정(새 ADR, `SUPERSEDED by NNNN`)과 사용자 승인을 거친다. ADR-0008의 수수료 확장이 ADR-0001을 바꾸지 않는 것이 그 예다.
-- V1 경로의 구조를 바꾸기 전에 V1 결과와 fingerprint를 golden master로 먼저 고정한다 (ADR-0005). golden 테스트를 실제로 작성하는 것은 별도 작업 명세와 승인이 필요하다. golden은 V1의 현재 출력을 고정할 뿐, 그 값이 금융적으로 옳다는 것을 증명하지 않는다.
+- V1 경로의 구조를 바꾸기 전에 V1 결과와 fingerprint를 golden master로 먼저 고정한다 (ADR-0005, ADR-0011). golden 테스트를 실제로 작성하는 것은 별도 작업 명세와 승인이 필요하다. golden은 V1의 현재 출력을 고정할 뿐, 그 값이 금융적으로 옳다는 것을 증명하지 않는다. golden 회귀, 독립 금융 검증, 차등 비교는 서로 다른 검증이며 서로를 대신하지 않는다 (ADR-0011).
 
 ## 8. 실전 거래 안전 (향후 구현 시 필수 요건)
 
