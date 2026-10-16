@@ -33,7 +33,7 @@
 | Paper Trading, Live Trading, 브로커 Adapter | **없음** | — |
 | 주문 상태 관리, Reconciliation, Kill Switch | **없음** | — |
 | Survivorship bias 처리 | **없음** | — |
-| ADR | **없음** | P0-02에서 작성 예정 |
+| ADR (설계 결정 기록) | ADR-0001~0003 **ACCEPTED** (2026-10-16, 정책 원칙만 승인). **구현은 시작하지 않음** | `docs/adr/` (§7.1) |
 
 `execution.py`의 `execute_market_order`는 **시뮬레이션 체결**이다. 실제 주문 기능이 아니다.
 
@@ -70,7 +70,9 @@
 
 ## 4. 아키텍처 방향 (잠정)
 
-> 아래는 **현재의 방향**이다. 최종 결정은 P0-02 ADR에서 확정한다. ADR이 나오기 전에는 방향을 이유로 기존 구조를 바꾸지 않는다.
+> 아래는 **현재의 방향**이다. 모듈 구조와 패키지 경계에 관한 ADR은 아직 없다. 그런 ADR이 승인되기 전에는 방향을 이유로 기존 구조를 바꾸지 않는다.
+>
+> 체결 시점과 손익 회계, warm-up과 거래 허용, 거래 전 위험 검사는 ACCEPTED ADR을 따른다: [ADR-0001](docs/adr/0001-execution-timing-and-valuation.md), [ADR-0002](docs/adr/0002-warmup-and-tradability.md), [ADR-0003](docs/adr/0003-pretrade-risk-policy.md). 이 ADR들은 설계 원칙이며 아직 구현되지 않았다. 기존 V1 API는 현재 동작을 유지한다 (각 ADR §8.0).
 
 - Python 중심 **Modular Monolith**
 - **Functional Core / Imperative Shell**: 금융 계산은 부수효과 없는 순수 함수와 frozen dataclass로 작성하고, I/O·시간·브로커 호출은 바깥 계층에 둔다. 현재 `src/carver_quant/`에는 I/O, 현재 시각 조회, 난수 사용이 없다. 이 성질을 유지한다.
@@ -83,7 +85,7 @@
 ### 4.1 현재 구조와 방향 사이의 차이 (수정하지 말고 인지만 할 것)
 
 - `data_quality.py`가 `system_backtest.ExecutionMarketDay`를 import한다. 데이터 계층이 백테스트 계층에 의존하는 역방향 의존이다.
-- 백테스트 경로가 여러 개 공존한다: `backtest.py`/`daily_step.py`(단일 상품) → `roll_aware_daily_step.py` → `contract_aware_*` → `system_backtest.py` → `portfolio_*`. 공통 로직 재사용 원칙과의 정합성은 P0-02에서 검토한다.
+- 백테스트 경로가 여러 개 공존한다: `backtest.py`/`daily_step.py`(단일 상품) → `roll_aware_daily_step.py` → `contract_aware_*` → `system_backtest.py` → `portfolio_*`. 공통 로직 재사용 원칙과의 정합성은 ADR-0001~0003의 범위 밖이며, 운영 기준 경로 결정(D-02)에서 따로 검토한다.
 - 책임 분리는 모듈 이름 수준에서만 이루어져 있다. 하위 패키지 경계는 없다.
 - 기존 코드에는 docstring이 전혀 없다 (§3.2 규칙과의 차이). 기존 함수에 docstring을 일괄 추가하는 작업은 별도 승인을 받은 뒤에 한다.
 
@@ -109,6 +111,10 @@
 - API 키나 계좌 비밀정보를 코드, 테스트, 로그, 문서, 커밋에 저장
 - `git push --force`, `git reset --hard`, 미커밋 변경 폐기, 기존 파일 삭제
 - `pyproject.toml`의 `requires-python` 변경, 의존성 범위 확대
+- ACCEPTED ADR과 충돌하는 구현 (충돌이 필요하면 먼저 새 ADR을 제안하고 승인받는다)
+- ADR의 Open Questions(한도 값, warm-up 길이, 체결 시각, FX 시점, 증거금 모델 등)를 임의로 정해 코드나 설정의 기본값으로 넣는 것
+
+ADR이 승인되었다고 해서 그 내용을 바로 구현해도 된다는 뜻은 아니다. 실제 금융 코드 변경에는 **별도 작업 명세, 독립 수치 검증, 단위 테스트, 사용자 승인**이 각각 필요하다 (§3.2).
 
 작업 명세에 다음 단계로 넘어가지 말라는 지시가 있으면, 해당 작업에서 멈추고 보고한다.
 
@@ -136,12 +142,33 @@
 - 책의 페이지나 표를 직접 확인하지 못했다면 페이지 번호나 인용문을 추정해서 쓰지 않는다. 출처를 확인하지 못한 수치는 `UNVERIFIED`로 표시한다.
   - 현재 `forecast.py`의 `AFTS_EWMAC_SCALARS`와 `combined_forecast.py`의 `AFTS_TREND_RULE_SETS`(FDM)는 코드에 출처 표기가 없다. 원전과 대조하지 않았으므로 상태는 **UNVERIFIED**다.
 - 구현 전에 입력, 출력, 전제조건, 예외조건, 인수 테스트를 먼저 정의한다.
-- 설계 결정은 ADR로 기록한다. 위치는 P0-02에서 정한다.
+- 설계 결정은 ADR로 기록한다 (§7.1).
 - 모든 감사·조사 결과는 다음 세 가지로 구분해 표시한다.
   - `CONFIRMED`: 코드나 실행 결과로 직접 확인함
   - `INFERRED`: 근거로부터 추론함
   - `UNVERIFIED`: 확인하지 못함
 - 기존 코드 주석은 한국어로 되어 있다. 새 주석도 같은 스타일을 따른다.
+
+### 7.1 ADR 관리 (2026-10-16 채택)
+
+| 항목 | 규칙 |
+|---|---|
+| 위치 | `docs/adr/` |
+| 파일 이름 | `NNNN-kebab-case-title.md`. 첫 번호 `0001`. 번호는 재사용하지 않는다 |
+| 상태 | `PROPOSED` / `ACCEPTED` / `REJECTED` / `SUPERSEDED by NNNN`. **상태 변경은 사용자 승인으로만 한다** |
+| 변경 | ACCEPTED ADR의 핵심 결정은 임의로 고치지 않는다. 결정을 바꾸려면 새 ADR로 대체한다. 오탈자, 링크, 명백한 문서 오류 수정은 허용하되 결정 내용은 바꾸지 않는다 |
+| 기록 방식 | 확정된 정책과 미해결 세부사항(Open Questions)을 구분해서 쓴다. 승인 범위를 Status 절에 적는다 |
+
+현재 ADR:
+
+| ADR | 주제 | 상태 |
+|---|---|---|
+| [0001](docs/adr/0001-execution-timing-and-valuation.md) | 체결 시점과 손익 회계 (시점 계약, multi-instrument 회계, 이중 차감 금지) | ACCEPTED (정책 원칙) |
+| [0002](docs/adr/0002-warmup-and-tradability.md) | Warm-up과 거래 허용 (Signal Eligibility, 프로필, LIVE fail-closed) | ACCEPTED (정책 원칙) |
+| [0003](docs/adr/0003-pretrade-risk-policy.md) | 거래 전 위험 검사 (검증된 위험 축소, 포트폴리오 검사, Trading State, Kill Switch 제약) | ACCEPTED (정책 원칙) |
+
+- **ACCEPTED는 설계 원칙의 승인이다.** 구현 완료, 금융 계산의 정확성 검증, Live Trading 준비 완료를 뜻하지 않는다.
+- 미해결 금융 수치(한도, warm-up 길이, vol 하한)와 시장·브로커별 결정(체결 시각, 평가가격, FX 시점, 증거금 모델, 복구 절차)은 각 ADR의 Open Questions로 남아 있다. 요약은 [P0-02A_DECISION_SUMMARY.md](docs/architecture/P0-02A_DECISION_SUMMARY.md)에 있다.
 
 ## 8. 실전 거래 안전 (향후 구현 시 필수 요건)
 
