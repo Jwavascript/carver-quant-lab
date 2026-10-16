@@ -33,7 +33,7 @@
 | Paper Trading, Live Trading, 브로커 Adapter | **없음** | — |
 | 주문 상태 관리, Reconciliation, Kill Switch | **없음** | — |
 | Survivorship bias 처리 | **없음** | — |
-| ADR (설계 결정 기록) | ADR-0001~0003 **ACCEPTED** (2026-10-16, 정책 원칙만 승인). **구현은 시작하지 않음** | `docs/adr/` (§7.1) |
+| ADR (설계 결정 기록) | ADR-0001~0006 **ACCEPTED** (2026-10-16, 설계 원칙만 승인). **구현은 시작하지 않음** | `docs/adr/` (§7.1) |
 
 `execution.py`의 `execute_market_order`는 **시뮬레이션 체결**이다. 실제 주문 기능이 아니다.
 
@@ -70,9 +70,9 @@
 
 ## 4. 아키텍처 방향 (잠정)
 
-> 아래는 **현재의 방향**이다. 모듈 구조와 패키지 경계에 관한 ADR은 아직 없다. 그런 ADR이 승인되기 전에는 방향을 이유로 기존 구조를 바꾸지 않는다.
+> 아래는 **현재의 방향**이다. 논리 계층과 의존성 방향은 ACCEPTED [ADR-0004](docs/adr/0004-market-data-and-domain-boundaries.md)를 따른다. 물리적 패키지 개편(하위 패키지 도입, 모듈 이동)은 별도 결정(D-10)과 승인 전에는 하지 않는다. 방향을 이유로 기존 구조를 바꾸지 않는다.
 >
-> 체결 시점과 손익 회계, warm-up과 거래 허용, 거래 전 위험 검사는 ACCEPTED ADR을 따른다: [ADR-0001](docs/adr/0001-execution-timing-and-valuation.md), [ADR-0002](docs/adr/0002-warmup-and-tradability.md), [ADR-0003](docs/adr/0003-pretrade-risk-policy.md). 이 ADR들은 설계 원칙이며 아직 구현되지 않았다. 기존 V1 API는 현재 동작을 유지한다 (각 ADR §8.0).
+> 체결 시점과 손익 회계, warm-up과 거래 허용, 거래 전 위험 검사는 ACCEPTED ADR을 따른다: [ADR-0001](docs/adr/0001-execution-timing-and-valuation.md), [ADR-0002](docs/adr/0002-warmup-and-tradability.md), [ADR-0003](docs/adr/0003-pretrade-risk-policy.md). 데이터 경계, 백테스트 경로와 V1 호환, 선물·ETF 상품 모델은 [ADR-0004](docs/adr/0004-market-data-and-domain-boundaries.md), [ADR-0005](docs/adr/0005-backtest-paths-and-v1-compatibility.md), [ADR-0006](docs/adr/0006-futures-etf-instrument-model.md)을 따른다. 이 ADR들은 설계 원칙이며 아직 구현되지 않았다. 기존 V1 API는 현재 동작을 유지한다 (ADR-0001~0003 §8.0, ADR-0005).
 
 - Python 중심 **Modular Monolith**
 - **Functional Core / Imperative Shell**: 금융 계산은 부수효과 없는 순수 함수와 frozen dataclass로 작성하고, I/O·시간·브로커 호출은 바깥 계층에 둔다. 현재 `src/carver_quant/`에는 I/O, 현재 시각 조회, 난수 사용이 없다. 이 성질을 유지한다.
@@ -84,8 +84,8 @@
 
 ### 4.1 현재 구조와 방향 사이의 차이 (수정하지 말고 인지만 할 것)
 
-- `data_quality.py`가 `system_backtest.ExecutionMarketDay`를 import한다. 데이터 계층이 백테스트 계층에 의존하는 역방향 의존이다.
-- 백테스트 경로가 여러 개 공존한다: `backtest.py`/`daily_step.py`(단일 상품) → `roll_aware_daily_step.py` → `contract_aware_*` → `system_backtest.py` → `portfolio_*`. 공통 로직 재사용 원칙과의 정합성은 ADR-0001~0003의 범위 밖이며, 운영 기준 경로 결정(D-02)에서 따로 검토한다.
+- `data_quality.py`가 `system_backtest.ExecutionMarketDay`를 import한다. 데이터 계층이 백테스트 계층에 의존하는 역방향 의존이다. 해소 방향은 ADR-0004에서 승인되었지만, 방식(타입 이동 + 재export / 이동 없는 `TYPE_CHECKING`·`Protocol`)은 승인되지 않았다 (ADR-0004 Q4-1).
+- 백테스트 경로가 여러 개 공존한다: `backtest.py`/`daily_step.py`(단일 상품) → `roll_aware_daily_step.py` → `contract_aware_*` → `system_backtest.py` → `portfolio_*`. ADR-0005에 따라 `run_combined_ewmac_portfolio_backtest`가 V1 기준 통합 진입점이고, 다섯 경로는 V1 재현·교육·비교 기준으로 보존한다. 기존 경로를 삭제하거나 새 엔진으로 재배선하지 않는다. 새 금융 기능은 새 연구 엔진(아직 없음)에만 넣는다.
 - 책임 분리는 모듈 이름 수준에서만 이루어져 있다. 하위 패키지 경계는 없다.
 - 기존 코드에는 docstring이 전혀 없다 (§3.2 규칙과의 차이). 기존 함수에 docstring을 일괄 추가하는 작업은 별도 승인을 받은 뒤에 한다.
 
@@ -166,9 +166,18 @@ ADR이 승인되었다고 해서 그 내용을 바로 구현해도 된다는 뜻
 | [0001](docs/adr/0001-execution-timing-and-valuation.md) | 체결 시점과 손익 회계 (시점 계약, multi-instrument 회계, 이중 차감 금지) | ACCEPTED (정책 원칙) |
 | [0002](docs/adr/0002-warmup-and-tradability.md) | Warm-up과 거래 허용 (Signal Eligibility, 프로필, LIVE fail-closed) | ACCEPTED (정책 원칙) |
 | [0003](docs/adr/0003-pretrade-risk-policy.md) | 거래 전 위험 검사 (검증된 위험 축소, 포트폴리오 검사, Trading State, Kill Switch 제약) | ACCEPTED (정책 원칙) |
+| [0004](docs/adr/0004-market-data-and-domain-boundaries.md) | 시장 데이터와 도메인 계층 경계 (도메인 계약 분리, 관측값·체결 가정·위험 입력 분리, 역방향 의존 금지, raw/조정 가격 구분, 관측·이용 가능 시각 구분, V1 재현성 보호) | ACCEPTED (설계 원칙) |
+| [0005](docs/adr/0005-backtest-paths-and-v1-compatibility.md) | 백테스트 경로와 V1 호환 (V1 기준 진입점, 기존 경로 보존, 새 기능은 새 연구 엔진, 구조 변경 전 golden master 고정) | ACCEPTED (설계 원칙) |
+| [0006](docs/adr/0006-futures-etf-instrument-model.md) | 선물·ETF 상품 모델 (Tagged Union + 합성, 상품 ID와 월물 ID 구분, 롤과 분배금·분할 분리, V1 `InstrumentSpec` 보호) | ACCEPTED (설계 원칙) |
 
-- **ACCEPTED는 설계 원칙의 승인이다.** 구현 완료, 금융 계산의 정확성 검증, Live Trading 준비 완료를 뜻하지 않는다.
-- 미해결 금융 수치(한도, warm-up 길이, vol 하한)와 시장·브로커별 결정(체결 시각, 평가가격, FX 시점, 증거금 모델, 복구 절차)은 각 ADR의 Open Questions로 남아 있다. 요약은 [P0-02A_DECISION_SUMMARY.md](docs/architecture/P0-02A_DECISION_SUMMARY.md)에 있다.
+- **ACCEPTED는 설계 원칙의 승인이다.** 구현 완료, 금융 계산의 정확성 검증, Live Trading 준비 완료를 뜻하지 않는다. ADR-0001~0006 모두 아직 구현되지 않았다.
+- 미해결 금융 수치(한도, warm-up 길이, vol 하한)와 시장·브로커별 결정(체결 시각, 평가가격, FX 시점, 증거금 모델, 복구 절차)은 각 ADR의 Open Questions로 남아 있다. 요약은 [P0-02A_DECISION_SUMMARY.md](docs/architecture/P0-02A_DECISION_SUMMARY.md)와 [P0-02B_DECISION_SUMMARY.md](docs/architecture/P0-02B_DECISION_SUMMARY.md)에 있다.
+- ADR-0004~0006에서 **승인되지 않은 선택** (구현 전에 사용자 결정이 필요하다. 전체 목록은 P0-02B 요약 §0.2):
+  - 역방향 의존을 없애는 방식: 타입 이동 + 재export / 이동 없는 `TYPE_CHECKING`·`Protocol` (ADR-0004 Q4-1)
+  - 새 `RESEARCH` API에서 날짜별 위험 예산 직접 입력을 허용할지 (ADR-0004 Q4-7). `LIVE`에서는 결정 시점 계좌와 위험 목표를 쓴다
+  - 첫 구현 자산 유형: 선물 / ETF / 동시 (ADR-0005 Q5-8, ADR-0006 Q6-1)
+  - golden master 테스트의 저장 형식, 상세 범위, 구현 시점 (ADR-0005 Q5-4, Q5-9)
+- V1 경로의 구조를 바꾸기 전에 V1 결과와 fingerprint를 golden master로 먼저 고정한다 (ADR-0005). golden 테스트를 실제로 작성하는 것은 별도 작업 명세와 승인이 필요하다. golden은 V1의 현재 출력을 고정할 뿐, 그 값이 금융적으로 옳다는 것을 증명하지 않는다.
 
 ## 8. 실전 거래 안전 (향후 구현 시 필수 요건)
 
