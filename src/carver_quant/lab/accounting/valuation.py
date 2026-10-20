@@ -65,6 +65,53 @@ class NavResult:
     open_policies: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class NavChange:
+    """두 평가 시각 사이 NAV 변화의 분해 (ADR-0008 §6.4). 단일 통화이므로 ② 환산·③ 환전 항이 없다."""
+
+    account_id: str
+    currency: str
+    start_at: datetime
+    end_at: datetime
+    nav_change: Decimal
+    external_flow: Decimal
+    investment_pnl: Decimal
+
+
+def nav_change(*, start: NavResult, end: NavResult) -> NavChange:
+    """두 NAV 사이의 변화를 외부 흐름과 투자 손익으로 나눈다.
+
+    공식: ΔNAV = NAV(end) − NAV(start), 외부 흐름 ④ = end.cash.external_flow − start.cash.external_flow,
+    투자 손익 = ΔNAV − ④ (ADR-0008 §6.4, X8-7). 단위: `currency`. 외부 흐름은 각 결과에 실린 현금 잔액의 누적 외부 흐름 차이라
+    그 NAV를 만든 현금 잔액과 늘 맞는다.
+    예외조건 (ValueError): COMPUTED가 아닌 결과, 계좌·통화 불일치, start.valuation_at ≥ end.valuation_at, 정확한 Decimal 계산 실패.
+    """
+    if not isinstance(start, NavResult) or not isinstance(end, NavResult):
+        raise ValueError("start and end must be NavResult values.")
+    if start.status is not NavStatus.COMPUTED or end.status is not NavStatus.COMPUTED:
+        raise ValueError("a NAV change needs two COMPUTED NAVs.")
+    if (start.account_id, start.currency) != (end.account_id, end.currency):
+        raise ValueError("a NAV change needs NAVs of one account and currency.")
+    if start.valuation_at >= end.valuation_at:
+        raise ValueError("start must be earlier than end.")
+    try:
+        with localcontext(EXACT_DECIMAL_CONTEXT):
+            change = end.nav - start.nav
+            flow = end.cash.external_flow - start.cash.external_flow
+            investment = change - flow
+    except DecimalException as error:
+        raise ValueError(f"exact decimal calculation failed: {error!r}") from error
+    return NavChange(
+        account_id=end.account_id,
+        currency=end.currency,
+        start_at=start.valuation_at,
+        end_at=end.valuation_at,
+        nav_change=change,
+        external_flow=flow,
+        investment_pnl=investment,
+    )
+
+
 def _check_times(valuation_at: datetime, information_cutoff: datetime) -> None:
     require_utc_instant(valuation_at, "valuation_at")
     require_utc_instant(information_cutoff, "information_cutoff")
@@ -85,6 +132,8 @@ def _check_price(price: object, unit_id: str, valuation_at: datetime, informatio
         raise ValueError(f"the price for {unit_id!r} must be a ValuationPrice.")
     if price.contract_id != unit_id:
         raise ValueError(f"the price for {unit_id!r} is a price for {price.contract_id!r}.")
+    if price.price <= 0:
+        raise ValueError(f"the ETF price for {unit_id!r} must be positive (currency per share, Slice 4 decision).")
     if price.valuation_at != valuation_at:
         raise ValueError(f"the price for {unit_id!r} is not a price for valuation time {valuation_at.isoformat()}.")
     if price.data_available_at > information_cutoff:
@@ -110,7 +159,8 @@ def position_market_value(
     (출처·이용 가능 시각 포함), 평가 시각, 정보 기준 시각 (UTC).
     전제조건: 보유 수량이 실제로 검증되었는지는 호출 경계의 책임이다. 목표 포지션·미체결 주문은 보유가 아니다.
     lot에 맞지 않는 보유도 그대로 평가한다 (반올림 없음, ADR-0013 R13-1).
-    예외조건 (ValueError): 보유 기준 시각 ≠ 평가 시각, 보유에 그 종목이 없음, 다른 종목·다른 평가 시각의 가격,
+    예외조건 (ValueError): 보유 기준 시각 ≠ 평가 시각, 보유에 그 종목이 없음, 0 이하 평가가격 (Slice 4 결정),
+    다른 종목·다른 평가 시각의 가격,
     information_cutoff나 평가 시각 뒤에 이용 가능해진 가격, information_cutoff > 평가 시각, 정확한 Decimal 계산 실패.
     """
     _check_times(valuation_at, information_cutoff)

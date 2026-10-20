@@ -90,9 +90,9 @@ class FillKey:
 class FillRecord:
     """실제 또는 시뮬레이션 체결 한 건 (ADR-0009 R9-3, §6.4a).
 
-    `quantity`는 부호 있는 정수 계약 수(매수 +, 매도 −), `price`는 raw 체결가 `F[k]`(pt),
-    `fee`는 `fee_currency` 단위 수수료다. 선택 필드(`broker_order_id`, `venue`, `liquidity_flag`)도
-    값이 없으면 None을 명시해서 넘긴다.
+    `quantity`는 부호 있는 정수 수량(매수 +, 매도 −), `price`는 raw 체결가 `F[k]`, `fee`는 `fee_currency` 단위 수수료(≥ 0)다.
+    단위는 기록을 받는 장부의 거래 단위가 정한다: 선물 `FillLedger`는 계약 수·pt, Slice 4의 `EtfFillLedger`는 주 수·통화/주.
+    선택 필드(`broker_order_id`, `venue`, `liquidity_flag`)도 값이 없으면 None을 명시해서 넘긴다.
     """
 
     key: FillKey
