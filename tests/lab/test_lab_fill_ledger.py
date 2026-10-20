@@ -200,29 +200,30 @@ def test_comparison_fields_cover_every_fill_field_except_key():
 def test_ledger_rejects_hand_built_states_that_break_idempotency():
     """입력: apply_fill을 거치지 않고 만든 장부. (a) 같은 키의 체결 두 건, (b) 다른 계좌의 체결,
     (c) 장부에 없는 월물의 체결, (d) 반영되지 않은 키의 중복 수신 기록, (e) replace로 같은 키 추가.
-    출력: 모두 ValueError. 장부 자체가 키당 한 건, 단일 계좌, 알려진 월물을 보장한다."""
+    출력: 모두 ValueError("can only be created"). Gate A 뒤로는 생성 제한이 먼저 막는다. 내부 생성 경로의 불변조건
+    (키당 한 건, 단일 계좌, 알려진 월물, 중복 수신)은 test_lab_ledger_integrity.py가 사유별로 시험한다."""
     c1 = contract(C1)
     x1 = make_fill()
     other_account = make_fill(key=FillKey(account_id="A2", fill_source="BRK", fill_id="X-2"))
     unknown_contract = make_fill(fill_id="X-3", contract_id="FUT.ALPHA.C3")
     common = dict(account_id="A1", contracts=(c1,), conflicts=())
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="can only be created"):
         FillLedger(applied=(x1, make_fill(quantity=3)), duplicates=(), **common)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="can only be created"):
         FillLedger(applied=(other_account,), duplicates=(), **common)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="can only be created"):
         FillLedger(applied=(unknown_contract,), duplicates=(), **common)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="can only be created"):
         FillLedger(applied=(), duplicates=(x1,), **common)
     ledger = apply_fill(empty_ledger(c1), x1).ledger
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="can only be created"):
         replace(ledger, applied=ledger.applied + (make_fill(quantity=3),))
 
 
 def test_key_subclass_cannot_bypass_idempotency():
     """입력: X-1 반영 뒤, 같은 (A1, BRK, X-1) 값을 가진 FillKey 하위 클래스 키로 같은 체결을 다시 보냄.
     출력: DUPLICATE (두 번째 APPLIED가 아님). 키는 정확한 FillKey로 정규화되므로 수량·손익이 두 번 반영되지 않는다.
-    직접 생성한 장부에 두 기록을 넣어도 ValueError."""
+    직접 생성한 장부에 두 기록을 넣어도 ValueError (생성 제한. 내부 경로의 키 중복 검사는 test_lab_ledger_integrity.py)."""
 
     class OtherKey(FillKey):
         pass
@@ -232,7 +233,7 @@ def test_key_subclass_cannot_bypass_idempotency():
 
     assert type(resend.key) is FillKey
     assert apply_fill(first.ledger, resend).verdict is FillVerdict.DUPLICATE
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="can only be created"):
         FillLedger(account_id="A1", contracts=(contract(C1), contract(C2)), applied=(make_fill(), resend), duplicates=(), conflicts=())
 
 

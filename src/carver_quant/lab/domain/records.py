@@ -20,13 +20,16 @@ from carver_quant.lab.domain.values import (
 
 @dataclass(frozen=True, kw_only=True)
 class FuturesContractSpec:
-    """선물 월물 하나의 사양. 승수 `M[c]`는 그 월물의 값만 쓴다 (ADR-0001 §6.2, I6-6)."""
+    """선물 월물 하나의 사양. 승수 `M[c]`는 그 월물의 값만 쓴다 (ADR-0001 §6.2, I6-6).
+
+    `lot_size`는 참조 데이터다. 값이 없으면 None을 명시하며, 1로 가정하지 않는다 (I6-11).
+    """
 
     contract_id: str
     instrument_id: str
     currency: str
     multiplier: Decimal
-    lot_size: int
+    lot_size: int | None
 
     def __post_init__(self) -> None:
         for name in ("contract_id", "instrument_id", "currency"):
@@ -35,10 +38,11 @@ class FuturesContractSpec:
         if multiplier <= 0:
             raise ValueError("multiplier must be greater than 0.")
         object.__setattr__(self, "multiplier", multiplier)
-        lot_size = require_int(self.lot_size, "lot_size")
-        if lot_size < 1:
-            raise ValueError("lot_size must be at least 1.")
-        object.__setattr__(self, "lot_size", lot_size)
+        if self.lot_size is not None:
+            lot_size = require_int(self.lot_size, "lot_size")
+            if lot_size < 1:
+                raise ValueError("lot_size must be at least 1.")
+            object.__setattr__(self, "lot_size", lot_size)
 
 
 class FillOrigin(Enum):

@@ -2,10 +2,14 @@
 
 순수 함수는 판정만 돌려준다. `HALTED` 같은 Trading State 전이는 하지 않는다 (ADR-0003 §6.5, L3는 shell 책임).
 `CONFLICT`가 기록된 장부로는 포지션·손익을 계산하지 않는다 (`FillIntegrityError`).
+
+장부는 `FillLedger.empty()`와 `apply_fill()`로만 만든다 (추가 전용). 직접 생성, `dataclasses.replace`, `copy.replace`는
+ValueError, 하위 클래스 정의는 TypeError이므로 기록된 충돌을 지운 장부를 만들 수 없다. 한계: 영속 저장이 없으므로, 호출자가 새 빈 장부에 받은 체결의
+일부만 다시 넣는 것은 이 계층에서 알 수 없다. 받은 기록 전체의 보존은 영속 기록(ADR-0009 Q9-9, ADR-0012 Q12-7)의 일이다.
 """
 
 from collections.abc import Iterable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from enum import Enum
 
 from carver_quant.lab.domain.records import (
@@ -27,31 +31,47 @@ class FillVerdict(Enum):
     CONFLICT = "CONFLICT"
 
 
+# 장부 생성 경로를 FillLedger.empty()와 apply_fill()로 제한하는 내부 표식. 생성 뒤에는 None으로 지운다.
+_LEDGER_BUILD_TOKEN = object()
+
+
+def _differing_fields(existing: FillRecord, incoming: FillRecord) -> tuple[str, ...]:
+    return tuple(name for name in FILL_COMPARISON_FIELDS if getattr(existing, name) != getattr(incoming, name))
+
+
 @dataclass(frozen=True)
 class FillConflict:
-    """무결성 오류의 증거. 기존 반영 기록과 거부된 재수신 기록을 모두 보관한다."""
+    """무결성 오류의 증거 (불변). 기존 반영 기록과 거부된 재수신 기록, 실제로 다른 필드를 모두 보관한다."""
 
     existing: FillRecord
     incoming: FillRecord
     differing_fields: tuple[str, ...]
 
-
-def _differing_fields(existing: FillRecord, incoming: FillRecord) -> tuple[str, ...]:
-    return tuple(field for field in FILL_COMPARISON_FIELDS if getattr(existing, field) != getattr(incoming, field))
+    def __post_init__(self) -> None:
+        if not isinstance(self.existing, FillRecord) or not isinstance(self.incoming, FillRecord):
+            raise ValueError("a conflict must hold two FillRecord values.")
+        if self.incoming.key != self.existing.key:
+            raise ValueError("a conflict must compare records with the same key.")
+        differing = _differing_fields(self.existing, self.incoming)
+        if not differing or self.differing_fields != differing:
+            raise ValueError("a conflict must list exactly the fields that differ.")
 
 
 def _require_valid_for_contract(fill: FillRecord, spec: FuturesContractSpec) -> None:
     if fill.fee_currency != spec.currency:
         raise ValueError("fee_currency must equal the contract currency in Slice 1.")
-    if fill.origin is FillOrigin.SIMULATED and fill.quantity % spec.lot_size != 0:
-        raise ValueError("a simulated fill must be a lot multiple until a simulation policy is approved.")
+    if fill.origin is FillOrigin.SIMULATED:
+        if spec.lot_size is None:
+            raise ValueError("a simulated fill cannot be checked against an unknown lot size.")
+        if fill.quantity % spec.lot_size != 0:
+            raise ValueError("a simulated fill must be a lot multiple until a simulation policy is approved.")
 
 
 @dataclass(frozen=True)
 class FillLedger:
     """단일 계좌의 반영 체결 장부 (불변). `applied`는 도착 순서이며 키마다 한 건이다.
 
-    직접 생성하거나 `dataclasses.replace`로 바꿔도 같은 불변조건을 검사한다: 키당 한 건, 장부 계좌의 체결,
+    `FillLedger.empty()`와 `apply_fill()`로만 만든다. 내부 생성 때도 불변조건을 검사한다: 키당 한 건, 장부 계좌의 체결,
     장부에 있는 월물, 수수료 통화 = 월물 통화, 중복 수신·충돌 기록은 반영된 키에 대한 것.
     """
 
@@ -60,8 +80,15 @@ class FillLedger:
     applied: tuple[FillRecord, ...]
     duplicates: tuple[FillRecord, ...]
     conflicts: tuple[FillConflict, ...]
+    _build_token: object = field(default=None, repr=False, compare=False)
+
+    def __init_subclass__(cls, **kwargs: object) -> None:
+        raise TypeError("FillLedger cannot be subclassed; a subclass could skip the ledger checks.")
 
     def __post_init__(self) -> None:
+        if self._build_token is not _LEDGER_BUILD_TOKEN:
+            raise ValueError("FillLedger can only be created with FillLedger.empty() and apply_fill().")
+        object.__setattr__(self, "_build_token", None)
         object.__setattr__(self, "account_id", require_identifier(self.account_id, "account_id"))
         for name in ("contracts", "applied", "duplicates", "conflicts"):
             if not isinstance(getattr(self, name), tuple):
@@ -98,16 +125,17 @@ class FillLedger:
                 raise ValueError("conflicts must contain FillConflict values.")
             if applied_by_key.get(conflict.existing.key) != conflict.existing:
                 raise ValueError("a conflict must refer to the applied fill with the same key.")
-            if conflict.incoming.key != conflict.existing.key:
-                raise ValueError("a conflict must compare records with the same key.")
-            if not conflict.differing_fields or conflict.differing_fields != _differing_fields(
-                conflict.existing, conflict.incoming
-            ):
-                raise ValueError("a conflict must list the fields that actually differ.")
 
     @classmethod
     def empty(cls, *, account_id: str, contracts: Iterable[FuturesContractSpec]) -> "FillLedger":
-        return cls(account_id=account_id, contracts=tuple(contracts), applied=(), duplicates=(), conflicts=())
+        return cls(
+            account_id=account_id,
+            contracts=tuple(contracts),
+            applied=(),
+            duplicates=(),
+            conflicts=(),
+            _build_token=_LEDGER_BUILD_TOKEN,
+        )
 
     def contract(self, contract_id: str) -> FuturesContractSpec:
         for spec in self.contracts:
@@ -157,7 +185,7 @@ def apply_fill(ledger: FillLedger, fill: FillRecord) -> FillApplication:
         if not differing:
             return FillApplication(
                 verdict=FillVerdict.DUPLICATE,
-                ledger=replace(ledger, duplicates=ledger.duplicates + (fill,)),
+                ledger=replace(ledger, duplicates=ledger.duplicates + (fill,), _build_token=_LEDGER_BUILD_TOKEN),
                 incoming=fill,
                 existing=existing,
                 differing_fields=(),
@@ -165,7 +193,7 @@ def apply_fill(ledger: FillLedger, fill: FillRecord) -> FillApplication:
         conflict = FillConflict(existing=existing, incoming=fill, differing_fields=differing)
         return FillApplication(
             verdict=FillVerdict.CONFLICT,
-            ledger=replace(ledger, conflicts=ledger.conflicts + (conflict,)),
+            ledger=replace(ledger, conflicts=ledger.conflicts + (conflict,), _build_token=_LEDGER_BUILD_TOKEN),
             incoming=fill,
             existing=existing,
             differing_fields=differing,
@@ -175,7 +203,7 @@ def apply_fill(ledger: FillLedger, fill: FillRecord) -> FillApplication:
 
     return FillApplication(
         verdict=FillVerdict.APPLIED,
-        ledger=replace(ledger, applied=ledger.applied + (fill,)),
+        ledger=replace(ledger, applied=ledger.applied + (fill,), _build_token=_LEDGER_BUILD_TOKEN),
         incoming=fill,
         existing=None,
         differing_fields=(),
