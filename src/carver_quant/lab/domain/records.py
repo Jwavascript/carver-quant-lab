@@ -1,4 +1,4 @@
-"""P0-03B Slice 1 도메인 기록: 선물 월물 사양, 체결 기록, 검증된 기준 포지션, raw 평가가격.
+"""P0-03B 도메인 기록: 선물 월물 사양, 체결 기록, 검증된 기준 포지션, raw 평가가격 (Slice 1), ETF 종목 사양 (Slice 3).
 
 이름은 V1 타입(`InstrumentSpec`, `execution.Fill` 등)과 겹치지 않게 정했다 (D3A-01, ADR-0010 PK-12).
 """
@@ -38,6 +38,29 @@ class FuturesContractSpec:
         if multiplier <= 0:
             raise ValueError("multiplier must be greater than 0.")
         object.__setattr__(self, "multiplier", multiplier)
+        if self.lot_size is not None:
+            lot_size = require_int(self.lot_size, "lot_size")
+            if lot_size < 1:
+                raise ValueError("lot_size must be at least 1.")
+            object.__setattr__(self, "lot_size", lot_size)
+
+
+@dataclass(frozen=True, kw_only=True)
+class EtfSpec:
+    """ETF 종목 하나의 사양 (Slice 3, ADR-0006 `EtfInstrument`의 최소 부분).
+
+    거래 단위는 종목 자체다 (I6-4). 수량 단위는 주, 평가가격 단위는 `currency`/주다. 승수 필드는 두지 않는다: ETF 승수는
+    1로 고정이다 (I6-6). `lot_size`는 참조 데이터이며 값이 없으면 None을 명시한다 (1로 가정하지 않음, I6-11).
+    평가는 lot을 쓰지 않는다 (ADR-0013 R13-1).
+    """
+
+    unit_id: str
+    currency: str
+    lot_size: int | None
+
+    def __post_init__(self) -> None:
+        for name in ("unit_id", "currency"):
+            object.__setattr__(self, name, require_identifier(getattr(self, name), name))
         if self.lot_size is not None:
             lot_size = require_int(self.lot_size, "lot_size")
             if lot_size < 1:
@@ -139,8 +162,9 @@ class PositionBaseline:
     """검증된 기준 포지션 (ADR-0009 R9-2, ADR-0013 R13-3).
 
     검증 절차는 구현하지 않는다 (Q13-2). 호출자가 검증 근거를 `verification_ref`로 명시한다.
-    `quantities`는 월물 ID별 정수 계약 수이며 0도 명시한다. 생성 시 Mapping 또는 (월물, 수량) 쌍을 받아
-    월물 ID 순으로 정렬한 tuple로 저장한다.
+    `quantities`는 거래 단위 ID별 정수 수량이며 0도 명시한다 (선물은 월물 ID·계약 수, Slice 3의 ETF는 종목 ID·주 수).
+    Slice 3 평가에서는 평가 시각에 검증된 실제 보유로 쓴다 (`as_of` = 평가 시각). 생성 시 Mapping 또는 (거래 단위 ID, 수량) 쌍을 받아
+    ID 순으로 정렬한 tuple로 저장한다.
     """
 
     account_id: str
@@ -177,7 +201,7 @@ class PositionBaseline:
 
 @dataclass(frozen=True, kw_only=True)
 class ValuationPrice:
-    """사용자가 지정한 월물별 raw 평가가격 `V[c,t]` (pt).
+    """사용자가 지정한 거래 단위별 raw 평가가격 `V[c,t]` (선물 pt, Slice 3의 ETF는 통화/주). `contract_id`는 거래 단위 ID다.
 
     평가가격 선택 정책은 구현하지 않는다 (Q1-2, Q7-3, Q7-4). `valuation_at`은 이 가격이 나타내는 평가 시각,
     `data_available_at`은 이 값을 실제로 쓸 수 있게 된 시각이다.

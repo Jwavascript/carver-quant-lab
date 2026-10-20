@@ -8,13 +8,23 @@ Slice 1 한정 규칙 (P0-03B-SLICE1, 전체 시스템의 수치·정규화 정�
   표기는 구분하지 않는다. 원본 응답 텍스트 보존은 이 Slice의 범위가 아니다 (원본 참조 형식은 ADR-0009 Q9-9).
   값 비교는 Decimal 수치 동일성이다 ("101", "101.0", "1.01E+2"는 같은 값). 반올림이나 허용 오차는 쓰지 않는다.
 - 식별자는 정확한 str로 바꿔 저장한다 (str 하위 클래스를 그대로 담지 않음).
+
+Slice 3: 현금·평가 계산은 `EXACT_DECIMAL_CONTEXT`를 쓴다 (trading_pnl의 문맥과 같은 설정).
 """
 
 import re
 from datetime import datetime, timedelta
-from decimal import Decimal
+from decimal import MAX_EMAX, MAX_PREC, MIN_EMIN, Context, Decimal, DivisionByZero, Inexact, InvalidOperation, Overflow
 
 _DECIMAL_LITERAL = re.compile(r"[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?")
+
+# 덧셈·뺄셈·곱셈만 쓰는 금액 계산용 문맥. 정밀도 한계 없이 정확히 계산하고, 반올림이 생기면 Inexact로 즉시 실패한다.
+EXACT_DECIMAL_CONTEXT = Context(
+    prec=MAX_PREC,
+    Emax=MAX_EMAX,
+    Emin=MIN_EMIN,
+    traps=[InvalidOperation, DivisionByZero, Overflow, Inexact],
+)
 
 
 def require_identifier(value: object, name: str) -> str:
